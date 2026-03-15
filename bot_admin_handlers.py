@@ -1,14 +1,5 @@
 """
 admin_handlers.py — команды администратора.
-
-/makeadmin <secret>  — получить права (секрет из .env ADMIN_SECRET)
-/admin               — панель с метриками
-/ban <user_id>       — заблокировать пользователя
-/unban <user_id>     — разблокировать
-/setplan <id> <plan> — изменить тариф (free / pro)
-/broadcast <текст>   — рассылка всем незабаненным
-
-Доступ только через /makeadmin с секретом.
 """
 
 import functools
@@ -19,7 +10,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from config import ADMIN_SECRET
-from db.queries import (
+from db_queries import (
     ban_user,
     get_all_users_ids,
     get_global_stats,
@@ -48,8 +39,6 @@ def _require_admin(func):
     return wrapper
 
 
-# ── /makeadmin <secret> ────────────────────────────────────────────────────
-
 @router.message(Command("makeadmin"))
 async def cmd_makeadmin(message: Message):
     upsert_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
@@ -62,8 +51,6 @@ async def cmd_makeadmin(message: Message):
     await message.answer("✅ Права администратора получены.")
     logger.info("Новый администратор: %s", message.from_user.id)
 
-
-# ── /admin ─────────────────────────────────────────────────────────────────
 
 @router.message(Command("admin"))
 @_require_admin
@@ -81,8 +68,6 @@ async def cmd_admin(message: Message):
         "/broadcast &lt;текст&gt;"
     )
 
-
-# ── /ban / /unban ──────────────────────────────────────────────────────────
 
 @router.message(Command("ban"))
 @_require_admin
@@ -110,8 +95,6 @@ async def cmd_unban(message: Message):
     log_event(message.from_user.id, "unban", str(target))
 
 
-# ── /setplan ───────────────────────────────────────────────────────────────
-
 @router.message(Command("setplan"))
 @_require_admin
 async def cmd_setplan(message: Message):
@@ -128,8 +111,6 @@ async def cmd_setplan(message: Message):
     await message.answer(f"✅ Тариф <code>{target}</code> → <b>{plan}</b>")
     log_event(message.from_user.id, "setplan", f"{target}:{plan}")
 
-
-# ── /broadcast ─────────────────────────────────────────────────────────────
 
 @router.message(Command("broadcast"))
 @_require_admin
