@@ -1,9 +1,7 @@
-from typing import List, Optional
+ from typing import List, Optional
 from config import MAX_HISTORY
-from db.models import get_db
+from db_models import get_db
 
-
-# ── Users ──────────────────────────────────────────────────────────────────
 
 def upsert_user(uid: int, username: Optional[str], first_name: Optional[str] = None) -> None:
     c = get_db()
@@ -76,8 +74,6 @@ def get_all_users_ids() -> List[int]:
     return [r["id"] for r in rows]
 
 
-# ── Alerts ──────────────────────────────────────────────────────────────────
-
 def add_alert(uid: int, kind: str, origin: str, destination: str,
               month: str, threshold: int, return_month: str = "") -> int:
     c = get_db()
@@ -139,13 +135,10 @@ def mark_seen(aid: int, key: str) -> None:
 
 
 def cleanup_seen_deals(days: int = 30) -> None:
-    """Удаляем старые записи seen_deals, чтобы таблица не росла бесконечно."""
     c = get_db()
     c.execute("DELETE FROM seen_deals WHERE seen_at < datetime('now', ?)", (f"-{days} days",))
     c.commit(); c.close()
 
-
-# ── History ──────────────────────────────────────────────────────────────────
 
 def add_history(uid: int, kind: str, origin: str, destination: str,
                 query_param: str, min_price: Optional[int], currency: str) -> None:
@@ -155,7 +148,6 @@ def add_history(uid: int, kind: str, origin: str, destination: str,
         "VALUES(?,?,?,?,?,?,?)",
         (uid, kind, origin, destination, query_param, min_price, currency)
     )
-    # FIX: используем MAX_HISTORY из config, а не хардкод 20
     c.execute(
         "DELETE FROM search_history WHERE user_id=? AND id NOT IN "
         "(SELECT id FROM search_history WHERE user_id=? ORDER BY id DESC LIMIT ?)",
@@ -172,8 +164,6 @@ def get_history(uid: int, limit: int = 10):
     ).fetchall()
     c.close(); return rows
 
-
-# ── Savings ──────────────────────────────────────────────────────────────────
 
 def log_saving(uid: int, alert_id: int, origin: str, destination: str,
                threshold: int, found_price: int, currency: str) -> None:
@@ -207,10 +197,7 @@ def get_savings_stats(uid: int) -> dict:
     }
 
 
-# ── Events (logging) ──────────────────────────────────────────────────────────
-
 def log_event(uid: Optional[int], event_type: str, payload: str = "") -> None:
-    """Логируем событие в таблицу events для аналитики."""
     try:
         c = get_db()
         c.execute(
@@ -219,11 +206,10 @@ def log_event(uid: Optional[int], event_type: str, payload: str = "") -> None:
         )
         c.commit(); c.close()
     except Exception:
-        pass  # Логирование никогда не должно ронять бот
+        pass
 
 
 def get_global_stats() -> dict:
-    """Глобальная статистика для /admin."""
     c = get_db()
     users   = c.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
     alerts  = c.execute("SELECT COUNT(*) AS n FROM alerts WHERE is_active=1").fetchone()["n"]
@@ -231,4 +217,4 @@ def get_global_stats() -> dict:
         "SELECT COUNT(*) AS n FROM events WHERE event_type='alert_triggered'"
     ).fetchone()["n"]
     c.close()
-    return {"users": users, "active_alerts": alerts, "notifications_sent": notifs}
+    return {"users": users, "active_alerts": alerts, "notifications_sent": notifs}   
