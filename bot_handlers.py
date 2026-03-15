@@ -914,7 +914,14 @@ async def cmd_help(message: Message):
         "Города: по-русски или IATA (MOW, LED, AER)"
     )
 
-
+@router.message(F.text == "🏨 Отели и туры")
+async def cmd_hotels(message: Message):
+    await message.answer(
+        "🏨 <b>Отели, авто и экскурсии</b>\n\n"
+        "Бронируй отели, арендуй авто и заказывай экскурсии!\n\n"
+        "👇 Нажми кнопку ниже:",
+        reply_markup=hotels_kb(),
+    )
 @router.message(F.text == "❌ Отмена")
 async def cmd_cancel(message: Message, state: FSMContext):
     await state.clear()
