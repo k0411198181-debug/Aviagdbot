@@ -10,7 +10,8 @@ def main_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="✈️ Авиабилеты"),   KeyboardButton(text="🚂 ЖД билеты")],
             [KeyboardButton(text="📅 Календарь цен"), KeyboardButton(text="🔥 Горящие")],
             [KeyboardButton(text="🔔 Мои алерты"),    KeyboardButton(text="📊 Статистика")],
-            [KeyboardButton(text="⚙️ Настройки"),     KeyboardButton(text="❓ Помощь")],
+            [KeyboardButton(text="🏨 Отели и туры"),  KeyboardButton(text="⚙️ Настройки")],
+            [KeyboardButton(text="❓ Помощь")],
         ],
         resize_keyboard=True,
     )
@@ -24,7 +25,6 @@ def cancel_kb() -> ReplyKeyboardMarkup:
 
 
 def skip_kb(label: str = "Пропустить") -> ReplyKeyboardMarkup:
-    """label — текст кнопки пропуска (передавай название города)."""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=f"➡️ {label}")],
@@ -79,7 +79,12 @@ def share_kb(bot_username: str) -> InlineKeyboardMarkup:
 
 
 def buy_kb(link: str, label: str = "Купить билет →") -> InlineKeyboardMarkup:
-    """Инлайн-кнопка перехода на покупку."""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text=label, url=link),
+    ]])
+
+
+def hotels_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🏨 Открыть HotelCar Bot", url="https://t.me/HotelCar_bot"),
     ]])
