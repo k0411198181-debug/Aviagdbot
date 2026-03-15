@@ -4,7 +4,7 @@ import html
 import logging
 
 from aiogram import Bot
-from db.queries import (
+from db_queries import (
     cleanup_seen_deals,
     get_active_alerts,
     is_seen,
@@ -13,7 +13,7 @@ from db.queries import (
     mark_seen,
     update_alert_price,
 )
-from services.aviasales import SYM, _link, get_min_price
+from services_aviasales import SYM, _link, get_min_price
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,6 @@ async def check_all_alerts(bot: Bot) -> None:
 
     logger.info("Алерты: отправлено %s", fired)
 
-    # Чистим seen_deals старше 30 дней (чтобы таблица не росла бесконечно)
     try:
         cleanup_seen_deals(days=30)
     except Exception as e:
