@@ -57,7 +57,33 @@ def _link(origin: str, dest: str, depart: str, ret: str = "") -> str:
     return f"https://www.aviasales.ru/search/{path}?marker={marker}"
 
 
-async def _get(endpoint: str, params: dict) -> dict:
+async def _get_v3(endpoint: str, params: dict) -> dict:
+    headers = {
+        "X-Access-Token": TP_TOKEN,
+        "Accept": "application/json",
+    }
+
+    async def _do(s: aiohttp.ClientSession) -> dict:
+        async with s.get(
+            f"{BASE}{endpoint}", params=params, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=15)
+        ) as r:
+            if r.status != 200:
+                logger.warning("Aviasales v3 %s -> HTTP %s", endpoint, r.status)
+                return {}
+            return await r.json()
+
+    try:
+        if _http_session and not _http_session.closed:
+            return await _do(_http_session)
+        async with aiohttp.ClientSession() as s:
+            return await _do(s)
+    except Exception as e:
+        logger.error("Aviasales API error %s: %s", endpoint, e)
+        return {}
+
+
+async def _get_v2(endpoint: str, params: dict) -> dict:
     params["token"] = TP_TOKEN
 
     async def _do(s: aiohttp.ClientSession) -> dict:
@@ -66,7 +92,7 @@ async def _get(endpoint: str, params: dict) -> dict:
             timeout=aiohttp.ClientTimeout(total=15)
         ) as r:
             if r.status != 200:
-                logger.warning("Aviasales %s → HTTP %s", endpoint, r.status)
+                logger.warning("Aviasales v2 %s -> HTTP %s", endpoint, r.status)
                 return {}
             return await r.json()
 
@@ -87,19 +113,20 @@ async def search_cheapest(
     return_month: str = "",
 ) -> List[Ticket]:
     params = {
-        "currency": currency,
         "origin": origin,
         "destination": destination,
         "departure_at": depart_month,
+        "currency": currency,
         "sorting": "price",
         "direct": "true" if direct_only else "false",
         "limit": 10,
         "page": 1,
+        "one_way": "false" if return_month else "true",
     }
     if return_month:
         params["return_at"] = return_month
 
-    data = await _get("/aviasales/v3/prices_for_dates", params)
+    data = await _get_v3("/aviasales/v3/prices_for_dates", params)
     tickets = []
     for item in data.get("data", []):
         price     = int(item.get("price", 0))
@@ -115,6 +142,33 @@ async def search_cheapest(
                 airline=item.get("airline", ""), currency=currency,
                 link=_link(origin, dest, depart, ret),
             ))
+
+    if not tickets:
+        v2data = await _get_v2("/v2/prices/cheap", {
+            "currency": currency,
+            "origin": origin,
+            "destination": destination,
+            "depart_date": depart_month,
+            "show_to_affiliates": "true",
+        })
+        raw = v2data.get("data", {})
+        dest_data = raw.get(destination.upper(), {}) if isinstance(raw, dict) else {}
+        for item in dest_data.values():
+            price     = int(item.get("price", 0))
+            depart    = item.get("departure", "")
+            transfers = item.get("transfers", 0)
+            ret       = item.get("return", "") or ""
+            if price > 0 and depart:
+                if direct_only and transfers > 0:
+                    continue
+                tickets.append(Ticket(
+                    origin=origin, destination=destination,
+                    depart_date=depart, return_date=ret,
+                    price=price, transfers=transfers,
+                    airline="", currency=currency,
+                    link=_link(origin, destination, depart, ret),
+                ))
+
     return sorted(tickets, key=lambda t: t.price)[:8]
 
 
@@ -124,17 +178,18 @@ async def search_latest(
     direct_only: bool = False,
 ) -> List[Ticket]:
     params = {
-        "currency": currency,
         "origin": origin,
+        "currency": currency,
         "sorting": "price",
         "direct": "true" if direct_only else "false",
         "limit": limit,
         "page": 1,
+        "one_way": "true",
     }
     if destination:
         params["destination"] = destination
 
-    data = await _get("/aviasales/v3/prices_for_dates", params)
+    data = await _get_v3("/aviasales/v3/prices_for_dates", params)
     tickets = []
     for item in data.get("data", []):
         price     = int(item.get("price", 0))
@@ -150,6 +205,36 @@ async def search_latest(
                 airline=item.get("airline", ""), currency=currency,
                 link=_link(origin, dest, depart, ret),
             ))
+
+    if not tickets:
+        v2params = {
+            "currency": currency,
+            "origin": origin,
+            "limit": limit,
+            "show_to_affiliates": "true",
+            "sorting": "price",
+            "trip_class": 0,
+        }
+        if destination:
+            v2params["destination"] = destination
+        v2data = await _get_v2("/v2/prices/latest", v2params)
+        for item in v2data.get("data", []):
+            price     = int(item.get("value", 0))
+            depart    = item.get("depart_date", "")
+            ret       = item.get("return_date", "") or ""
+            dest      = item.get("destination", destination)
+            transfers = item.get("number_of_changes", 0)
+            if price > 0:
+                if direct_only and transfers > 0:
+                    continue
+                tickets.append(Ticket(
+                    origin=item.get("origin", origin), destination=dest,
+                    depart_date=depart, return_date=ret,
+                    price=price, transfers=transfers,
+                    airline=item.get("airline", ""), currency=currency,
+                    link=_link(origin, dest, depart, ret),
+                ))
+
     return tickets
 
 
@@ -159,15 +244,16 @@ async def get_month_calendar(
     direct_only: bool = False,
 ) -> List[CalendarDay]:
     params = {
-        "currency": currency,
         "origin": origin,
         "destination": destination,
+        "currency": currency,
         "sorting": "price",
         "direct": "true" if direct_only else "false",
         "limit": 30,
         "page": 1,
+        "one_way": "true",
     }
-    data = await _get("/aviasales/v3/prices_for_dates", params)
+    data = await _get_v3("/aviasales/v3/prices_for_dates", params)
     days = []
     for item in data.get("data", []):
         price     = int(item.get("price", 0))
@@ -179,6 +265,27 @@ async def get_month_calendar(
                 currency=currency,
                 link=_link(origin, destination, depart),
             ))
+
+    if not days:
+        v2data = await _get_v2("/v2/prices/month-matrix", {
+            "currency": currency,
+            "origin": origin,
+            "destination": destination,
+            "show_to_affiliates": "true",
+        })
+        for item in v2data.get("data", []):
+            price     = int(item.get("value", 0))
+            depart    = item.get("depart_date", "")
+            transfers = item.get("number_of_changes", 0)
+            if price > 0 and depart:
+                if direct_only and transfers > 0:
+                    continue
+                days.append(CalendarDay(
+                    date=depart, price=price, transfers=transfers,
+                    currency=currency,
+                    link=_link(origin, destination, depart),
+                ))
+
     return sorted(days, key=lambda d: d.price)
 
 
@@ -194,8 +301,9 @@ async def get_special_offers(
         "direct": "false",
         "limit": limit,
         "page": 1,
+        "one_way": "true",
     }
-    data = await _get("/aviasales/v3/prices_for_dates", params)
+    data = await _get_v3("/aviasales/v3/prices_for_dates", params)
     tickets = []
     for item in (data.get("data") or [])[:limit]:
         depart = (item.get("departure_at") or "")[:10]
@@ -231,4 +339,4 @@ async def get_min_price(
     )
     if not tickets:
         tickets = await search_latest(origin, destination, currency)
-    return min(t.price for t in tickets) if tickets else None      
+    return min(t.price for t in tickets) if tickets else None
