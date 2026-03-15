@@ -1,15 +1,5 @@
 """
 handlers.py — все хэндлеры бота.
-
-Фичи: онбординг, авиа (туда / туда-обратно), ЖД, календарь,
-      горящие + error fares, алерты с возвратом, история,
-      статистика, поделиться, фильтр прямых, тарифы free/pro.
-
-Исправления vs предыдущей версии:
-  - Имя города при нажатии «Пропустить» показывается корректно
-  - MAX_HISTORY берётся из config, а не хардкодится
-  - Валидация даты ЖД: нельзя выбрать прошедшую дату
-  - Мёртвый код cb_currency / Onboarding.currency убран
 """
 
 import html
@@ -21,34 +11,32 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from bot.fsm import (
+from bot_fsm import (
     AddAlert, CalendarSearch, Onboarding,
     SearchAvia, SearchTrain, SetCity,
 )
-from bot.keyboards import (
+from bot_keyboards import (
     alert_kb, cancel_kb, currency_inline, main_menu,
     onboard_city_kb, share_kb, skip_kb, yes_no_kb,
 )
 from config import BOT_USERNAME, MAX_ALERTS_FREE, MAX_ALERTS_PRO
-from db.queries import (
+from db_queries import (
     add_alert, add_history, count_alerts, get_direct_only,
     get_history, get_savings_stats, get_user, get_user_alerts,
     get_user_plan, is_onboarded, is_user_banned, log_event,
     remove_alert, set_alert_active, set_city, set_currency,
     set_direct_only, set_onboarded, update_alert_price, upsert_user,
 )
-from services.aviasales import (
+from services_aviasales import (
     SYM, _link, get_month_calendar, get_special_offers,
     search_cheapest, search_latest,
 )
-from services.iata import resolve_iata, resolve_iata_async, resolve_train_station
-from services.tutu import get_popular_routes, get_train_link
+from services_iata import resolve_iata, resolve_iata_async, resolve_train_station
+from services_tutu import get_popular_routes, get_train_link
 
 logger = logging.getLogger(__name__)
 router = Router()
 
-
-# ── Хелперы ───────────────────────────────────────────────────────────────
 
 def _valid_month(s: str) -> bool:
     try:
@@ -61,13 +49,12 @@ def _valid_month(s: str) -> bool:
 def _valid_date(s: str) -> bool:
     try:
         d = datetime.strptime(s.strip(), "%Y-%m-%d")
-        return d.date() >= datetime.now().date()   # FIX: нельзя выбирать прошлое
+        return d.date() >= datetime.now().date()
     except ValueError:
         return False
 
 
 async def _reg(m: Message) -> bool:
-    """Регистрирует пользователя и проверяет бан. Возвращает False если забанен."""
     upsert_user(m.from_user.id, m.from_user.username, m.from_user.first_name)
     if is_user_banned(m.from_user.id):
         await m.answer("🚫 Ваш аккаунт заблокирован.")
@@ -84,7 +71,6 @@ def _currency_from_user(row) -> str:
 
 
 def _city_name(iata: str) -> str:
-    """FIX: получаем читаемое имя города из IATA-кода."""
     res = resolve_iata(iata)
     return res[1] if res else iata
 
@@ -108,8 +94,6 @@ def _fmt_avia(tickets, origin: str, dest: str, sym: str, label: str,
         )
     return "\n".join(lines)
 
-
-# ── ОНБОРДИНГ ─────────────────────────────────────────────────────────────
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
@@ -199,8 +183,6 @@ async def onboard_direct(message: Message, state: FSMContext):
     )
 
 
-# ── АВИАБИЛЕТЫ (с возвратом) ───────────────────────────────────────────────
-
 @router.message(Command("search"))
 @router.message(F.text == "✈️ Авиабилеты")
 async def cmd_avia(message: Message, state: FSMContext):
@@ -214,7 +196,7 @@ async def cmd_avia(message: Message, state: FSMContext):
         "✈️ <b>Поиск авиабилетов</b>\n\n"
         f"Шаг 1/4. Откуда?\n"
         f"Город по умолч.: <b>{_city_name(city)}</b>",
-        reply_markup=skip_kb(_city_name(city)),  # FIX: показываем имя, а не код
+        reply_markup=skip_kb(_city_name(city)),
     )
 
 
@@ -227,7 +209,7 @@ async def fsm_avia_origin(message: Message, state: FSMContext):
     data = await state.get_data()
     if message.text.startswith("➡️"):
         iata = data["default_city"]
-        name = _city_name(iata)   # FIX: правильное имя вместо IATA-кода
+        name = _city_name(iata)
     else:
         result = await resolve_iata_async(message.text.strip())
         if not result:
@@ -336,8 +318,6 @@ async def fsm_avia_return(message: Message, state: FSMContext):
     await wait.edit_text(text, disable_web_page_preview=True)
 
 
-# ── КАЛЕНДАРЬ ЦЕН ─────────────────────────────────────────────────────────
-
 @router.message(Command("calendar"))
 @router.message(F.text == "📅 Календарь цен")
 async def cmd_calendar(message: Message, state: FSMContext):
@@ -419,8 +399,6 @@ async def fsm_cal_dest(message: Message, state: FSMContext):
         lines.append(f"\n<i>Показаны 10 лучших из {len(days)} дней</i>")
     await wait.edit_text("\n".join(lines), disable_web_page_preview=True)
 
-
-# ── ЖД БИЛЕТЫ ─────────────────────────────────────────────────────────────
 
 @router.message(Command("train"))
 @router.message(F.text == "🚂 ЖД билеты")
@@ -504,7 +482,7 @@ async def fsm_train_date(message: Message, state: FSMContext):
         await message.answer("Отменено.", reply_markup=main_menu())
         return
     date = message.text.strip()
-    if not _valid_date(date):   # FIX: проверяем что дата не в прошлом
+    if not _valid_date(date):
         await message.answer(
             "❌ Формат: <code>2025-09-15</code>\n"
             "<i>Дата не может быть в прошлом.</i>"
@@ -531,8 +509,6 @@ async def fsm_train_date(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=main_menu(), disable_web_page_preview=True)
 
 
-# ── ГОРЯЩИЕ + ERROR FARES ─────────────────────────────────────────────────
-
 @router.message(Command("deals"))
 @router.message(F.text == "🔥 Горящие")
 async def cmd_deals(message: Message):
@@ -546,14 +522,12 @@ async def cmd_deals(message: Message):
 
     wait = await message.answer(f"🔥 Ищу горящие из <b>{_city_name(city)}</b>...")
 
-    # 1. Error fares (аномально низкие цены)
     special = []
     try:
         special = await get_special_offers(city, currency, limit=4)
     except Exception as e:
         logger.error("special_offers: %s", e)
 
-    # 2. Свежие из кэша
     latest = []
     try:
         latest = await search_latest(city, currency=currency, limit=10, direct_only=direct)
@@ -591,7 +565,6 @@ async def cmd_deals(message: Message):
                 f"   <a href=\"{html.escape(t.link)}\">Купить</a>"
             )
 
-    # ЖД популярные маршруты
     try:
         train_routes = get_popular_routes(city)
         if train_routes:
@@ -604,8 +577,6 @@ async def cmd_deals(message: Message):
     log_event(message.from_user.id, "deals", city)
     await wait.edit_text("\n".join(lines), disable_web_page_preview=True)
 
-
-# ── АЛЕРТЫ ────────────────────────────────────────────────────────────────
 
 @router.message(Command("alert"))
 async def cmd_alert_start(message: Message, state: FSMContext):
@@ -790,8 +761,6 @@ async def cb_resume(callback: CallbackQuery):
     await callback.answer()
 
 
-# ── ИСТОРИЯ ───────────────────────────────────────────────────────────────
-
 @router.message(Command("history"))
 async def cmd_history(message: Message):
     if not await _reg(message):
@@ -813,8 +782,6 @@ async def cmd_history(message: Message):
         )
     await message.answer("\n\n".join(lines))
 
-
-# ── СТАТИСТИКА ─────────────────────────────────────────────────────────────
 
 @router.message(Command("stats"))
 @router.message(F.text == "📊 Статистика")
@@ -839,8 +806,6 @@ async def cmd_stats(message: Message):
     )
 
 
-# ── ПОДЕЛИТЬСЯ ────────────────────────────────────────────────────────────
-
 @router.message(Command("share"))
 async def cmd_share(message: Message):
     await message.answer(
@@ -855,8 +820,6 @@ async def cmd_share(message: Message):
 async def cb_copy(callback: CallbackQuery):
     await callback.answer(f"Ссылка: https://t.me/{BOT_USERNAME}", show_alert=True)
 
-
-# ── НАСТРОЙКИ ─────────────────────────────────────────────────────────────
 
 @router.message(Command("settings"))
 @router.message(F.text == "⚙️ Настройки")
