@@ -1,11 +1,3 @@
-"""
-tutu.py — ЖД билеты через Tutu.ru (партнёрка Travelpayouts).
-
-Реального API с ценами нет — генерируем партнёрскую ссылку
-с заполненными полями (откуда, куда, дата). Пользователь
-нажимает → попадает на Tutu.ru → покупает → комиссия ~1.5%.
-"""
-
 import logging
 from dataclasses import dataclass
 from typing import List
@@ -14,7 +6,6 @@ from config import TP_MARKER
 
 logger = logging.getLogger(__name__)
 
-# IATA → код станции Tutu
 IATA_TO_TUTU = {
     "MOW": "2000000", "LED": "2004000", "OVB": "2060000",
     "SVX": "2030000", "KZN": "2060600", "GOJ": "2010000",
@@ -52,24 +43,17 @@ class TrainLink:
 
 
 def _tutu_link(from_code: str, to_code: str, date: str) -> str:
-    """Партнёрская ссылка Tutu.ru."""
     marker   = TP_MARKER or ""
     date_fmt = date.replace("-", ".") if date else ""
-    base     = f"https://www.tutu.ru/poezda/rasp_d.php?nnst1={from_code}&nnst2={to_code}"
+    url = f"https://www.tutu.ru/poezda/rasp_d.php?nnst1={from_code}&nnst2={to_code}"
     if date_fmt:
-        base += f"&date={date_fmt}"
+        url += f"&date={date_fmt}"
     if marker:
-        return (
-            f"https://c45.travelpayouts.com/click"
-            f"?shmarker={marker}&promo_id=1770"
-            f"&source_type=customlink&type=click"
-            f"&custom_url={base}"
-        )
-    return base
+        url += f"&partner={marker}"
+    return url
 
 
 def get_train_link(origin_iata: str, dest_iata: str, date: str) -> TrainLink:
-    """Создаём ссылку на поиск ЖД билетов."""
     from_code = IATA_TO_TUTU.get(origin_iata.upper(), "2000000")
     to_code   = IATA_TO_TUTU.get(dest_iata.upper(), "2004000")
     from_name = STATION_NAMES.get(from_code, origin_iata)
@@ -82,10 +66,9 @@ def get_train_link(origin_iata: str, dest_iata: str, date: str) -> TrainLink:
 
 
 def get_popular_routes(origin_iata: str) -> List[TrainLink]:
-    """Популярные ЖД маршруты из города."""
     from_code = IATA_TO_TUTU.get(origin_iata.upper(), "2000000")
     from_name = STATION_NAMES.get(from_code, origin_iata)
-    popular   = [
+    popular = [
         ("2000000", "Москва"), ("2004000", "Санкт-Петербург"),
         ("2060000", "Новосибирск"), ("2090001", "Сочи"), ("2070000", "Краснодар"),
     ]
