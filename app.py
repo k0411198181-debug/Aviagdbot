@@ -8,12 +8,12 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from bot.admin_handlers import router as admin_router
-from bot.handlers import router
+from bot_admin_handlers import router as admin_router
+from bot_handlers import router
 from config import BOT_TOKEN, CHECK_INTERVAL, LOG_LEVEL
-from db.models import init_db
-from services.aviasales import set_http_session
-from services.monitor import check_all_alerts
+from db_models import init_db
+from services_aviasales import set_http_session
+from services_monitor import check_all_alerts
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -26,7 +26,6 @@ async def main() -> None:
     init_db()
     logger.info("БД инициализирована")
 
-    # Одна shared aiohttp сессия на весь бот (правильный паттерн)
     http_session = aiohttp.ClientSession()
     set_http_session(http_session)
     logger.info("HTTP сессия создана")
