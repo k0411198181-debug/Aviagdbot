@@ -1,4 +1,4 @@
- from typing import List, Optional
+from typing import List, Optional
 from config import MAX_HISTORY
 from db_models import get_db
 
