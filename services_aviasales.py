@@ -1,30 +1,15 @@
-"""
-aviasales.py — Travelpayouts Data API.
-
-Эндпоинты:
-  /v2/prices/cheap              — дешёвые билеты за месяц
-  /v2/prices/latest             — свежие из кэша 48ч (горящие)
-  /v2/prices/month-matrix       — цены на каждый день (Календарь)
-  /aviasales/v3/get_special_offers    — аномально низкие / error fares
-  /aviasales/v3/get_popular_directions — популярные направления
-
-Shared aiohttp сессия: set_http_session() вызывается один раз при старте.
-"""
-
-import logging
+  import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 
 import aiohttp
-
 from config import TP_MARKER, TP_TOKEN
 
 logger = logging.getLogger(__name__)
 BASE = "https://api.travelpayouts.com"
 SYM  = {"rub": "₽", "usd": "$", "eur": "€", "try": "₺"}
 
-# Единственная сессия на всё время работы бота
 _http_session: Optional[aiohttp.ClientSession] = None
 
 
@@ -56,13 +41,11 @@ class CalendarDay:
 
 
 def _link(origin: str, dest: str, depart: str, ret: str = "") -> str:
-    """Партнёрская deep-link на Aviasales."""
     marker = TP_MARKER or ""
     try:
         dep_fmt = datetime.strptime(depart[:10], "%Y-%m-%d").strftime("%d%m")
     except Exception:
         dep_fmt = "0101"
-
     if ret:
         try:
             ret_fmt = datetime.strptime(ret[:10], "%Y-%m-%d").strftime("%d%m")
@@ -71,12 +54,10 @@ def _link(origin: str, dest: str, depart: str, ret: str = "") -> str:
             path = f"{origin}{dep_fmt}{dest}1"
     else:
         path = f"{origin}{dep_fmt}{dest}1"
-
     return f"https://www.aviasales.ru/search/{path}?marker={marker}"
 
 
 async def _get(endpoint: str, params: dict) -> dict:
-    """HTTP GET через shared session (или временную если не инициализирована)."""
     params["token"] = TP_TOKEN
 
     async def _do(s: aiohttp.ClientSession) -> dict:
@@ -99,44 +80,40 @@ async def _get(endpoint: str, params: dict) -> dict:
         return {}
 
 
-# ── Основные функции ──────────────────────────────────────────────────────
-
 async def search_cheapest(
     origin: str, destination: str,
     depart_month: str, currency: str = "rub",
     direct_only: bool = False,
     return_month: str = "",
 ) -> List[Ticket]:
-    """Дешёвые билеты за месяц."""
-    params: dict = {
-        "currency":           currency,
-        "origin":             origin,
-        "destination":        destination,
-        "depart_date":        depart_month,
-        "show_to_affiliates": "true",
+    params = {
+        "currency": currency,
+        "origin": origin,
+        "destination": destination,
+        "departure_at": depart_month,
+        "sorting": "price",
+        "direct": "true" if direct_only else "false",
+        "limit": 10,
+        "page": 1,
     }
     if return_month:
-        params["return_date"] = return_month
+        params["return_at"] = return_month
 
-    data    = await _get("/v2/prices/cheap", params)
+    data = await _get("/aviasales/v3/prices_for_dates", params)
     tickets = []
-    raw     = data.get("data", {})
-    dest_data = raw.get(destination.upper(), {}) if isinstance(raw, dict) else {}
-
-    for item in dest_data.values():
+    for item in data.get("data", []):
         price     = int(item.get("price", 0))
-        depart    = item.get("departure", "")
-        transfers = item.get("transfers", 0)
-        ret       = item.get("return", "") or ""
+        depart    = (item.get("departure_at") or "")[:10]
+        ret       = (item.get("return_at") or "")[:10]
+        transfers = item.get("number_of_changes", 0)
+        dest      = item.get("destination", destination)
         if price > 0 and depart:
-            if direct_only and transfers > 0:
-                continue
             tickets.append(Ticket(
-                origin=origin, destination=destination,
+                origin=origin, destination=dest,
                 depart_date=depart, return_date=ret,
                 price=price, transfers=transfers,
-                airline="", currency=currency,
-                link=_link(origin, destination, depart, ret),
+                airline=item.get("airline", ""), currency=currency,
+                link=_link(origin, dest, depart, ret),
             ))
     return sorted(tickets, key=lambda t: t.price)[:8]
 
@@ -146,26 +123,26 @@ async def search_latest(
     currency: str = "rub", limit: int = 8,
     direct_only: bool = False,
 ) -> List[Ticket]:
-    """Свежие из кэша 48ч."""
-    params: dict = {
-        "currency": currency, "origin": origin,
-        "limit": limit, "show_to_affiliates": "true",
-        "sorting": "price", "trip_class": 0,
+    params = {
+        "currency": currency,
+        "origin": origin,
+        "sorting": "price",
+        "direct": "true" if direct_only else "false",
+        "limit": limit,
+        "page": 1,
     }
     if destination:
         params["destination"] = destination
 
-    data    = await _get("/v2/prices/latest", params)
+    data = await _get("/aviasales/v3/prices_for_dates", params)
     tickets = []
     for item in data.get("data", []):
-        price     = int(item.get("value", 0))
-        depart    = item.get("depart_date", "")
-        ret       = item.get("return_date", "") or ""
+        price     = int(item.get("price", 0))
+        depart    = (item.get("departure_at") or "")[:10]
+        ret       = (item.get("return_at") or "")[:10]
         dest      = item.get("destination", destination)
         transfers = item.get("number_of_changes", 0)
         if price > 0:
-            if direct_only and transfers > 0:
-                continue
             tickets.append(Ticket(
                 origin=item.get("origin", origin), destination=dest,
                 depart_date=depart, return_date=ret,
@@ -181,21 +158,22 @@ async def get_month_calendar(
     currency: str = "rub",
     direct_only: bool = False,
 ) -> List[CalendarDay]:
-    """Цены на каждый день для Календаря."""
-    data = await _get("/v2/prices/month-matrix", {
-        "currency":           currency,
-        "origin":             origin,
-        "destination":        destination,
-        "show_to_affiliates": "true",
-    })
+    params = {
+        "currency": currency,
+        "origin": origin,
+        "destination": destination,
+        "sorting": "price",
+        "direct": "true" if direct_only else "false",
+        "limit": 30,
+        "page": 1,
+    }
+    data = await _get("/aviasales/v3/prices_for_dates", params)
     days = []
     for item in data.get("data", []):
-        price     = int(item.get("value", 0))
-        depart    = item.get("depart_date", "")
+        price     = int(item.get("price", 0))
+        depart    = (item.get("departure_at") or "")[:10]
         transfers = item.get("number_of_changes", 0)
         if price > 0 and depart:
-            if direct_only and transfers > 0:
-                continue
             days.append(CalendarDay(
                 date=depart, price=price, transfers=transfers,
                 currency=currency,
@@ -209,12 +187,15 @@ async def get_special_offers(
     currency: str = "rub",
     limit: int = 6,
 ) -> List[Ticket]:
-    """Error fares / аномально низкие цены (из v1)."""
-    data = await _get("/aviasales/v3/get_special_offers", {
-        "origin":   origin,
-        "locale":   "ru",
+    params = {
+        "origin": origin,
         "currency": currency,
-    })
+        "sorting": "price",
+        "direct": "false",
+        "limit": limit,
+        "page": 1,
+    }
+    data = await _get("/aviasales/v3/prices_for_dates", params)
     tickets = []
     for item in (data.get("data") or [])[:limit]:
         depart = (item.get("departure_at") or "")[:10]
@@ -237,37 +218,17 @@ async def get_popular_destinations(
     currency: str = "rub",
     limit: int = 10,
 ) -> List[Ticket]:
-    """Популярные направления и лучшие цены из города (из v1)."""
-    data = await _get("/aviasales/v3/get_popular_directions", {
-        "origin":   origin,
-        "locale":   "ru",
-        "currency": currency.upper(),
-        "limit":    limit,
-        "page":     1,
-    })
-    tickets = []
-    for item in (data.get("data") or {}).get("origin", []):
-        depart = (item.get("departure_at") or "")[:10]
-        ret    = (item.get("return_at") or "")[:10]
-        dest   = item.get("destination") or item.get("city_iata", "")
-        price  = int(item.get("price", 0))
-        if price > 0 and dest:
-            tickets.append(Ticket(
-                origin=origin, destination=dest,
-                depart_date=depart, return_date=ret,
-                price=price, transfers=0,
-                airline="", currency=currency,
-                link=_link(origin, dest, depart, ret),
-            ))
-    return sorted(tickets, key=lambda t: t.price)
+    return await search_latest(origin, currency=currency, limit=limit)
 
 
 async def get_min_price(
     origin: str, destination: str, month: str,
     currency: str, return_month: str = "",
 ) -> Optional[int]:
-    """Минимальная цена — для проверки алертов."""
-    tickets = await search_cheapest(origin, destination, month, currency, return_month=return_month)
+    tickets = await search_cheapest(
+        origin, destination, month, currency,
+        return_month=return_month
+    )
     if not tickets:
         tickets = await search_latest(origin, destination, currency)
-    return min(t.price for t in tickets) if tickets else None
+    return min(t.price for t in tickets) if tickets else None      
