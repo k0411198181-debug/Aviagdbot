@@ -26,7 +26,6 @@ from bot_fsm import (
     SearchAvia, SearchTrain, SetCity,
 )
 from bot_keyboards import (
-    hotels_kb,
     alert_kb, cancel_kb, currency_inline, main_menu,
     onboard_city_kb, share_kb, skip_kb, yes_no_kb,
 )
@@ -953,17 +952,20 @@ async def cmd_help(message: Message):
     )
 
 
-@router.message(F.text == "🏨 Отели и туры")
-async def cmd_hotels(message: Message):
-    await message.answer(
-        "🏨 <b>Отели, авто и экскурсии</b>\n\n"
-        "Бронируй отели, арендуй авто и заказывай экскурсии!\n\n"
-        "👇 Нажми кнопку ниже:",
-        reply_markup=hotels_kb(),
-    )
-
-
 @router.message(F.text == "❌ Отмена")
 async def cmd_cancel(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Отменено.", reply_markup=main_menu())
+
+
+@router.message(F.text == "🏨 Отели и туры")
+async def cmd_hotels(message: Message):
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    await message.answer(
+        "🏨 <b>Отели, авто и экскурсии</b>\n\n"
+        "Бронируй отели, арендуй авто и заказывай экскурсии!\n\n"
+        "👇 Нажми кнопку ниже:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🏨 Открыть HotelCar Bot", url="https://t.me/HotelCar_bot")
+        ]])
+    )
